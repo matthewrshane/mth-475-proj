@@ -1,0 +1,10 @@
+# directories
+.vscode
+
+# file types
+*.png
+*.pdf
+*.txt
+*.out
+
+# specific files
