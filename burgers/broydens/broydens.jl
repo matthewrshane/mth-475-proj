@@ -103,11 +103,11 @@ function calculateJ(u::Array{ReduFloat}, Dx::Matrix{ReduFloat}, dt::ReduFloat)::
 end
 
 """
-    newtonsMethod!(F!, J!, x_0, F, J, [tol, max_iters])
+    newtonsMethod!(calcF, calcJ, u, [tol, max_iters])
 
 Performs the iterative Newton's Method to solve the system of
-equations defined by y[1] and y[2], with F! and J! as the
-update functions for F and J, respectively.
+equations defined by calcF with Jacobian calcJ, using an initial
+guess of u.
 """
 function newtonsMethod!(calcF::Function, calcJ::Function, u::Array{ReduFloat}, tol::ReduFloat = ReduFloat(5.0) * eps(ReduFloat), max_iters::Integer = 20)::Array{ReduFloat}
     # loop until max_iters has been reached
@@ -132,7 +132,7 @@ function newtonsMethod!(calcF::Function, calcJ::Function, u::Array{ReduFloat}, t
 end
 
 """
-    driver(F, J, u, num_steps, time_start, time_end, alpha)
+    driver(u, Dx, num_steps, x, time_start, time_end)
 
 Performs the main calculations over num_steps time steps,
 using the provided input and initial values.
@@ -146,9 +146,6 @@ function driver(u::Array{FullFloat}, Dx::Matrix{ReduFloat}, num_steps::Integer, 
 
     # define Jacobian now since it doesn't change with each time step
     calcJ(u::Array{ReduFloat}) = calculateJ(u, Dx, ReduFloat(dt))
-
-    # TODO: store u values for plotting
-    # u_vals = zeros(FullFloat, num_steps, length(x))
 
     # iterate over each time step
     for i = 1:num_steps
@@ -173,16 +170,10 @@ function driver(u::Array{FullFloat}, Dx::Matrix{ReduFloat}, num_steps::Integer, 
 
         # increment total time
         time_total += dt
-
-        # TODO: save values of u for plotting
-        # u_vals[i, :] = u
-
-        # TODO: add values to plot if plotting is enabled
-        # plot!(u_vals[:, 1], u_vals[:, 2])
     end
 
     # TODO: just plot the final time step
-    plot!(x, [u, u_init], title="Burger's Equation w/ Newton's (t = $time_end)", label=["u" "u_init"])
+    plot!(x, u, label="u (num_steps=$num_steps)")
 
     # return u
     return u
@@ -215,7 +206,9 @@ u_finals = zeros(FullFloat, length(num_steps_arr), num_x_pts)
 
 # initialize plot if enabled
 plot_file = get(parsed_args, "plot", Nothing)
-if !isnothing(plot_file) plot() end
+if !isnothing(plot_file)
+    plot(x, u_init, title="Burger's Equation w/ Newton's (t = $time_end)", label=string(ufunc))
+end
 
 # loop through each num_steps
 for (i, num_steps) in enumerate(num_steps_arr)
