@@ -109,7 +109,7 @@ Performs the iterative Newton's Method to solve the system of
 equations defined by calcF with Jacobian calcJ, using an initial
 guess of u.
 """
-function newtonsMethod!(calcF::Function, calcJ::Function, u::Array{ReduFloat}, tol::ReduFloat = ReduFloat(5.0) * eps(ReduFloat), max_iters::Integer = 20)::Array{ReduFloat}
+function newtonsMethod!(calcF::Function, calcJ::Function, u::Array{ReduFloat}; tol::ReduFloat = ReduFloat(5.0) * eps(ReduFloat), max_iters::Integer = 20)::Array{ReduFloat}
     # loop until max_iters has been reached
     for i = 1:max_iters
         # calculate the values of F
@@ -162,7 +162,7 @@ function driver(u::Array{FullFloat}, Dx::Matrix{ReduFloat}, num_steps::Integer, 
         calcF(y::Array{ReduFloat}) = calculateF(y, redu_u, Dx, ReduFloat(dt))
 
         # solve the system with newtons method and convert to full precision
-        redu_y = newtonsMethod!(calcF, calcJ, redu_u, ReduFloat(1.e-14), 1)
+        redu_y = newtonsMethod!(calcF, calcJ, redu_u)
         full_y = convert(Array{FullFloat}, redu_y)
 
         # TODO: full precision broyden's style update to correct Newton's iter
@@ -222,9 +222,9 @@ for (i, num_steps) in enumerate(num_steps_arr)
     println(if length(num_steps_arr) > 1 "$num_steps: " else "" end * string(u))
 end
 
-# save u final values with corresponding num_steps to a file if option has been used
+# save u final values with corresponding dt values to a file if option has been used
 output_file = get(parsed_args, "output", Nothing)
-if !isnothing(output_file) writedlm(output_file, cat(num_steps_arr, u_finals; dims = 2)) end
+if !isnothing(output_file) writedlm(output_file, cat((time_end - time_start) ./ num_steps_arr, u_finals; dims = 2)) end
 
 # save plot to file if enabled
 if !isnothing(plot_file) savefig(plot_file) end
