@@ -172,7 +172,7 @@ function driver(u::Array{FullFloat}, Dx::Matrix{ReduFloat}, num_steps::Integer, 
         time_total += dt
     end
 
-    # TODO: just plot the final time step
+    # plot the final time step
     plot!(x, u, label="u (num_steps=$num_steps)")
 
     # return u
