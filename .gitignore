@@ -6,5 +6,6 @@
 *.pdf
 *.txt
 *.out
+*.keras
 
 # specific files
