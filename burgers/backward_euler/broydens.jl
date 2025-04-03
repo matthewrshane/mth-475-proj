@@ -88,7 +88,7 @@ const ReduFloat = get(ValidDatatypes, get(parsed_args, "ReduType", "Float32"), F
 Calculate the values of F as a function of y.
 """
 function calculateF(y::Array{ReduFloat}, u::Array{ReduFloat}, Dx::Matrix{ReduFloat}, dt::ReduFloat)::Array{ReduFloat}
-    # calculate value of u
+    # calculate value of F
     return y - u + (dt * Dx * (0.5 * y.^2))
 end
 
