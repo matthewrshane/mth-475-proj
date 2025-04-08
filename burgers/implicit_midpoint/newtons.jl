@@ -4,6 +4,7 @@ using DelimitedFiles;
 using FFTW;
 using LinearAlgebra;
 using Plots;
+using Printf;
 using Quadmath;
 using TimerOutputs;
 
@@ -99,7 +100,7 @@ Calculate the values of J, the Jacobian matrix.
 """
 function calculateJ(u::Array{ReduFloat}, Dx::Matrix{ReduFloat}, dt::ReduFloat)::Matrix{ReduFloat}
     # calculate value of J
-    return -(dt * Dx * diagm(u)) - I
+    return -(dt * Dx * Diagonal(u)) - I
 end
 
 """
@@ -113,7 +114,7 @@ function newtonsMethod!(calcF::Function, calcJ::Function, u::Array{ReduFloat}; t
     # loop until max_iters has been reached
     for i = 1:max_iters
         # calculate the values of F
-        F = calcF(u)
+        @timeit to "F" F = calcF(u)
 
         # break if tolerance reached
         if norm(F, Inf) < tol
@@ -121,10 +122,10 @@ function newtonsMethod!(calcF::Function, calcJ::Function, u::Array{ReduFloat}; t
         end
 
         # calculate the values of J
-        J = calcJ(u)
+        @timeit to "J" J = calcJ(u)
 
         # update guess for u
-        u = u - (J \ F)
+        @timeit to "newtons" u = u - (J \ F)
     end
 
     # return u for completeness
@@ -137,15 +138,18 @@ end
 Performs the main calculations over num_steps time steps,
 using the provided input and initial values.
 """
-function driver(u::Array{FullFloat}, Dx::Matrix{ReduFloat}, num_steps::Integer, x::Array{FullFloat}, time_start::FullFloat, time_end::FullFloat)::Array{FullFloat}
+function driver(u::Array{FullFloat}, Dx::Matrix{FullFloat}, num_steps::Integer, x::Array{FullFloat}, time_start::FullFloat, time_end::FullFloat)::Array{FullFloat}
     # calculate dt
     dt = (time_end - time_start) / num_steps
 
     # track total time
     time_total = time_start
 
+    # store reduced precision Dx
+    redu_Dx = convert(Matrix{ReduFloat}, Dx)
+
     # define Jacobian now since it doesn't change with each time step
-    calcJ(u::Array{ReduFloat}) = calculateJ(u, Dx, ReduFloat(0.5 * dt))
+    calcJ(u::Array{ReduFloat}) = calculateJ(u, redu_Dx, ReduFloat(0.5 * dt))
 
     # iterate over each time step
     for i = 1:num_steps
@@ -159,7 +163,7 @@ function driver(u::Array{FullFloat}, Dx::Matrix{ReduFloat}, num_steps::Integer, 
         redu_u = convert(Array{ReduFloat}, u)
 
         # define calcU each time step since it changes
-        calcF(y::Array{ReduFloat}) = calculateF(y, redu_u, Dx, ReduFloat(0.5 * dt))
+        calcF(y::Array{ReduFloat}) = calculateF(y, redu_u, redu_Dx, ReduFloat(0.5 * dt))
 
         # solve the system with newtons method and convert to full precision
         redu_y = newtonsMethod!(calcF, calcJ, redu_u)
@@ -196,10 +200,10 @@ u_init = eval(ufunc)
 
 # calculate fourier matrices
 K_size = (num_x_pts - 1) / 2
-K = diagm(-K_size:K_size)
+K = Diagonal(-K_size:K_size)
 Dx = ifft(ifftshift(im * K * fftshift(fft(I(num_x_pts)))))
 Dx = real.(Dx)
-Dx = convert(Matrix{ReduFloat}, Dx)
+Dx = convert(Matrix{FullFloat}, Dx)
 
 # store all final u values
 u_finals = zeros(FullFloat, length(num_steps_arr), num_x_pts)
@@ -207,13 +211,15 @@ u_finals = zeros(FullFloat, length(num_steps_arr), num_x_pts)
 # initialize plot if enabled
 plot_file = get(parsed_args, "plot", Nothing)
 if !isnothing(plot_file)
-    plot(x, u_init, title="Burger's Equation w/ Newton's (t = $time_end)", label=string(ufunc))
+    plot(x, u_init, title=@sprintf("Burger's Equation w/ Newton's (t = %.2f)", time_end), label=string(ufunc))
 end
+
+const to = TimerOutput()
 
 # loop through each num_steps
 for (i, num_steps) in enumerate(num_steps_arr)
     # call the driver function
-    u = driver(u_init, Dx, num_steps, x, time_start, time_end);
+    @timeit to "t=$num_steps" u = driver(u_init, Dx, num_steps, x, time_start, time_end);
 
     # store final value of u
     u_finals[i, :] = u
@@ -221,6 +227,8 @@ for (i, num_steps) in enumerate(num_steps_arr)
     # print final value of u
     # TODO: println(if length(num_steps_arr) > 1 "$num_steps: " else "" end * string(u))
 end
+
+show(to)
 
 # save u final values with corresponding dt values to a file if option has been used
 output_file = get(parsed_args, "output", Nothing)
