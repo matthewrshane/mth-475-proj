@@ -88,7 +88,7 @@ const ReduFloat = get(ValidDatatypes, get(parsed_args, "ReduType", "Float32"), F
 
 Calculate the values of F as a function of y.
 """
-function calculateF(y::Array{ReduFloat}, u::Array{ReduFloat}, Dx::Matrix{FullFloat}, dt::ReduFloat)::Array{ReduFloat}
+function calculateF(y::Array{ReduFloat}, u::Array{ReduFloat}, Dx::Matrix{ReduFloat}, dt::ReduFloat)::Array{ReduFloat}
     # calculate value of F
     return u - dt * Dx * (0.5 * y.^2) - y
 end
@@ -98,7 +98,7 @@ end
 
 Calculate the values of J, the Jacobian matrix.
 """
-function calculateJ(u::Array{ReduFloat}, Dx::Matrix{FullFloat}, dt::ReduFloat)::Matrix{ReduFloat}
+function calculateJ(u::Array{ReduFloat}, Dx::Matrix{ReduFloat}, dt::ReduFloat)::Matrix{ReduFloat}
     # calculate value of J
     return -(dt * Dx * Diagonal(u)) - I
 end
