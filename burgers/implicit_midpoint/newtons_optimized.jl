@@ -4,6 +4,7 @@ using DelimitedFiles;
 using FFTW;
 using LinearAlgebra;
 using Plots;
+using Printf;
 using Quadmath;
 using TimerOutputs;
 
@@ -75,9 +76,6 @@ end
 # parse the arguments
 parsed_args = parse_args(ARGS, s)
 
-# TODO: multithreading
-BLAS.set_num_threads(Threads.nthreads())
-
 # define float constants
 const FullFloat = get(ValidDatatypes, get(parsed_args, "FullType", "Float64"), Float64);
 const ReduFloat = get(ValidDatatypes, get(parsed_args, "ReduType", "Float32"), Float32);
@@ -90,9 +88,18 @@ const ReduFloat = get(ValidDatatypes, get(parsed_args, "ReduType", "Float32"), F
 
 Calculate the values of F as a function of y.
 """
-function calculateF(y::Array{ReduFloat}, u::Array{ReduFloat}, Dx::Matrix{ReduFloat}, dt::ReduFloat)::Array{ReduFloat}
+function calculateF!(F::Array{ReduFloat}, y::Array{ReduFloat}, u::Array{ReduFloat}, Dx::Matrix{ReduFloat}, dt::ReduFloat, y2::Array{ReduFloat}, dtDx::Matrix{ReduFloat})
     # calculate value of F
-    return u - dt * Dx * (0.5 * y.^2) - y
+    y2 .= y
+    y2 .^= 2
+    y2 .*= ReduFloat(0.5)
+    # mul!(dtDx, dt, Dx)
+    mul!(F, Dx, y2)
+    F .*= -dt
+    F .+= u
+    F .-= y
+
+    # F .= u - dt * Dx * (0.5 * y.^2) - y
 end
 
 """
@@ -100,9 +107,13 @@ end
 
 Calculate the values of J, the Jacobian matrix.
 """
-function calculateJ(u::Array{ReduFloat}, Dx::Matrix{ReduFloat}, dt::ReduFloat)::Matrix{ReduFloat}
+function calculateJ!(J::Matrix{ReduFloat}, u::Array{ReduFloat}, Dx::Matrix{ReduFloat}, dt::ReduFloat)
     # calculate value of J
-    return -(dt * Dx * diagm(u)) - I
+    mul!(J, Dx, Diagonal(u))
+    J .*= -dt
+    J .-= I(length(u))
+
+    # J .= -(dt * Dx * Diagonal(u)) - I
 end
 
 """
@@ -112,11 +123,11 @@ Performs the iterative Newton's Method to solve the system of
 equations defined by calcF with Jacobian calcJ, using an initial
 guess of u.
 """
-function newtonsMethod!(calcF::Function, calcJ::Function, u::Array{ReduFloat}; tol::ReduFloat = ReduFloat(5.0) * eps(ReduFloat), max_iters::Integer = 20)::Array{ReduFloat}
+function newtonsMethod!(calcF!::Function, calcJ!::Function, F::Array{ReduFloat}, J::Matrix{ReduFloat}, u::Array{ReduFloat}, ut::Array{ReduFloat}; tol::ReduFloat = ReduFloat(5.0) * eps(ReduFloat), max_iters::Integer = 20)::Array{ReduFloat}
     # loop until max_iters has been reached
     for i = 1:max_iters
         # calculate the values of F
-        F = calcF(u)
+        @timeit to "F" calcF!(F, u)
 
         # break if tolerance reached
         if norm(F, Inf) < tol
@@ -124,10 +135,20 @@ function newtonsMethod!(calcF::Function, calcJ::Function, u::Array{ReduFloat}; t
         end
 
         # calculate the values of J
-        J = calcJ(u)
-
+        @timeit to "J" calcJ!(J, u)
+        
         # update guess for u
-        u = u - (J \ F)
+        # A \ b => x = A'b
+        @timeit to "newtons" begin
+            # TODO: BLAS has no functions for Float128, but they might be more efficient for lower precisions?
+            # BLAS.gemv!('T', ReduFloat(1.0), J, F, ReduFloat(0.0), ut)
+
+            # mul!(ut, transpose(J), F)
+            # u = u - ut
+
+            # TODO: try to find a way to not allocate but still solve J \ F (maybe use in place ldiv! with lu! but i think these don't support Float128)
+            u = u - (J \ F)
+        end
     end
 
     # return u for completeness
@@ -140,15 +161,28 @@ end
 Performs the main calculations over num_steps time steps,
 using the provided input and initial values.
 """
-function driver(u::Array{FullFloat}, Dx::Matrix{ReduFloat}, num_steps::Integer, x::Array{FullFloat}, time_start::FullFloat, time_end::FullFloat)::Array{FullFloat}
+function driver(F::Array{ReduFloat}, J::Matrix{ReduFloat}, u::Array{FullFloat}, Dx::Matrix{FullFloat}, num_steps::Integer, x::Array{FullFloat}, time_start::FullFloat, time_end::FullFloat)::Array{FullFloat}
     # calculate dt
     dt = (time_end - time_start) / num_steps
 
     # track total time
     time_total = time_start
 
+    # store reduced precision Dx
+    redu_Dx = convert(Matrix{ReduFloat}, Dx)
+
     # define Jacobian now since it doesn't change with each time step
-    calcJ(u::Array{ReduFloat}) = calculateJ(u, Dx, ReduFloat(0.5 * dt))
+    calcJ!(J::Matrix{ReduFloat}, u::Array{ReduFloat}) = calculateJ!(J, u, redu_Dx, ReduFloat(0.5 * dt))
+
+    # initialize variables
+    ut = zeros(ReduFloat, length(u))::Array{ReduFloat}
+    y2 = zeros(ReduFloat, length(u))::Array{ReduFloat}
+    dtDx = zeros(ReduFloat, size(Dx))::Matrix{ReduFloat}
+    redu_u = zeros(ReduFloat, length(u))::Array{ReduFloat}
+    redu_y = zeros(ReduFloat, length(u))::Array{ReduFloat}
+
+    full_y2 = zeros(ReduFloat, length(u))::Array{FullFloat}
+    full_ut = zeros(ReduFloat, length(u))::Array{FullFloat}
 
     # iterate over each time step
     for i = 1:num_steps
@@ -159,17 +193,25 @@ function driver(u::Array{FullFloat}, Dx::Matrix{ReduFloat}, num_steps::Integer, 
 
         # implicit step
         # convert u to reduced precision
-        redu_u = convert(Array{ReduFloat}, u)
+        # redu_u = convert(Array{ReduFloat}, u)
+        redu_u .= ReduFloat.(u)
 
         # define calcU each time step since it changes
-        calcF(y::Array{ReduFloat}) = calculateF(y, redu_u, Dx, ReduFloat(0.5 * dt))
+        calcF!(F::Array{ReduFloat}, y::Array{ReduFloat}) = calculateF!(F, y, redu_u, redu_Dx, ReduFloat(0.5 * dt), y2, dtDx)
 
         # solve the system with newtons method and convert to full precision
-        redu_y = newtonsMethod!(calcF, calcJ, redu_u)
+        redu_y .= newtonsMethod!(calcF!, calcJ!, F, J, redu_u, ut)
         full_y = convert(Array{FullFloat}, redu_y)
 
         # full precision explicit step
-        u = u - (dt * Dx * (0.5 * full_y.^2))
+        # TODO: !!! we want to make this in place? !!!
+        full_y2 .= full_y
+        full_y2 .^= 2
+        full_y2 .*= FullFloat(0.5)
+        mul!(full_ut, Dx, y2)
+        full_ut .*= -dt
+        u .+= full_ut
+        # u = u - (dt * (Dx * (0.5 * full_y.^2)))
 
         # increment total time
         time_total += dt
@@ -202,7 +244,7 @@ K_size = (num_x_pts - 1) / 2
 K = diagm(-K_size:K_size)
 Dx = ifft(ifftshift(im * K * fftshift(fft(I(num_x_pts)))))
 Dx = real.(Dx)
-Dx = convert(Matrix{ReduFloat}, Dx)
+Dx = convert(Matrix{FullFloat}, Dx)
 
 # store all final u values
 u_finals = zeros(FullFloat, length(num_steps_arr), num_x_pts)
@@ -210,15 +252,18 @@ u_finals = zeros(FullFloat, length(num_steps_arr), num_x_pts)
 # initialize plot if enabled
 plot_file = get(parsed_args, "plot", Nothing)
 if !isnothing(plot_file)
-    plot(x, u_init, title="Burger's Equation w/ Newton's (t = $time_end)", label=string(ufunc))
+    plot(x, u_init, title=@sprintf("Burger's Equation w/ Newton's (t = %.2f)", time_end), label=string(ufunc))
 end
 
 const to = TimerOutput()
 
 # loop through each num_steps
 for (i, num_steps) in enumerate(num_steps_arr)
+    F = zeros(ReduFloat, length(u_init))
+    J = zeros(ReduFloat, size(Dx))
+
     # call the driver function
-    @timeit to "t=$num_steps" u = driver(u_init, Dx, num_steps, x, time_start, time_end);
+    @timeit to "t=$num_steps" u = driver(F, J, u_init, Dx, num_steps, x, time_start, time_end);
 
     # store final value of u
     u_finals[i, :] = u
