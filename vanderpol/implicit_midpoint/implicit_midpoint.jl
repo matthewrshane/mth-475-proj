@@ -171,7 +171,7 @@ function driver(F::Array{ReduFloat}, J::Matrix{ReduFloat}, u::Array{FullFloat}, 
     end
 
     # add values to plot if plotting is enabled
-    plot!(u_vals[:, 1], u_vals[:, 2])
+    plot!(u_vals[:, 1], u_vals[:, 2], label="t = $time_end")
 
     # return u
     return u
@@ -213,4 +213,9 @@ output_file = get(parsed_args, "output", Nothing)
 if !isnothing(output_file) writedlm(output_file, cat(num_steps_arr, u_finals; dims = 2)) end
 
 # save plot to file if enabled
-if !isnothing(plot_file) savefig(plot_file) end
+if !isnothing(plot_file)
+    title!("Van der Pol Oscillator")
+    xlabel!("y₁")
+    ylabel!("y₂")
+    savefig(plot_file)
+end
