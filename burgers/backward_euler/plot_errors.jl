@@ -4,7 +4,7 @@ using Plots;
 using Quadmath;
 
 # define l2 error calculation function
-l2(A, d=1) = sqrt.(sum(abs2, A, dims=d))
+l2(A, d=1) = sqrt.(sum(abs2, A, dims=d)) / sqrt.(length(A))
 
 # define arguments and usage
 const NBS = '\ua0';
